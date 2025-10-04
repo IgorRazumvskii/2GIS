@@ -17,6 +17,62 @@
     <div id="container"></div>
     <script src="https://mapgl.2gis.com/api/js/v1"></script>
     <script>
+
+const BACKEND_URL = 'http://localhost:8000';
+async function sendPointsToBackend(points) {
+    console.log('Отправляю точки:', points);
+    try {
+        const response = await fetch(`${BACKEND_URL}/points`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                points: points
+            })
+        });
+
+        console.log('Статус ответа:', response.status);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('Получен результат:', result);
+        return result;
+    } catch (error) {
+        console.error('Ошибка при отправке запроса:', error);
+        throw error;
+    }
+}
+
+function createPoint(type, lon, lat) {
+    return {
+        type: type,
+        lon: lon,
+        lat: lat
+    };
+}
+
+const pointsArray = [
+    createPoint("stop", 37.587317608021735, 55.737091443574),
+    createPoint("stop", 37.74537806871605, 55.75775013247308)
+];
+
+// Обернуть вызов в асинхронную функцию
+async function main() {
+    try {
+        const result = await sendPointsToBackend(pointsArray);
+        console.log('✅ Успех! Ответ:', result);
+
+    } catch (error) {
+        console.log('❌ Ошибка:', error);
+    }
+}
+
+// Вызвать функцию
+main();
         const map = new mapgl.Map('container', {
             center: [37.620, 55.750],
             zoom: 14,

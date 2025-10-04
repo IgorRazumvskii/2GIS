@@ -4,6 +4,7 @@ from typing import List
 import httpx
 from dotenv import load_dotenv
 import os
+from fastapi.middleware.cors import CORSMiddleware
 
 
 # modules
@@ -15,6 +16,14 @@ load_dotenv()
 API_KEY = os.getenv("API_KEY")
 APP_ID = os.getenv("APP_ID")
 
+origins = ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/points")
 async def receive_points(request: PointsRequest):
