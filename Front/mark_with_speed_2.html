@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>2GIS — pick 2 markers & animate with real speed</title>
+<style>
+  html,body,#container { height:100%; margin:0; }
+  #container { width:100vw; height:100vh; }
+  #ui {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    z-index: 9999;
+    background: rgba(255,255,255,0.9);
+    border-radius: 8px;
+    padding: 8px;
+    font-family: sans-serif;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  }
+  #msg { font-size:13px; margin-bottom:6px; color:#222; }
+  #speedDisplay { font-size:12px; color:#333; margin-top:4px; }
+  #resetBtn { padding:6px 8px; cursor:pointer; }
+  .marker-dot {
+    display:flex; align-items:center; justify-content:center;
+    width:22px; height:22px; border-radius:50%;
+    color:#fff; font-weight:700; font-size:12px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.4); border:2px solid #fff;
+  }
+</style>
+</head>
+<body>
+  <div id="container"></div>
+  <div id="ui">
+    <div id="msg">Кликните по карте: <b>1</b> — старт (A), <b>2</b> — финиш (B).</div>
+    <button id="resetBtn">Сбросить точки</button>
+    <div id="speedDisplay">Скорость: 0 км/ч</div>
+    <div style="margin-top:8px; font-size:12px; color:#555">Откройте консоль (F12) для логов.</div>
+  </div>
+
+<script src="https://mapgl.2gis.com/api/js/v1"></script>
+<script>
+(function () {
+  const BACKEND_URL = 'http://localhost:8000';
+  const containerMsg = document.getElementById('msg');
+  const speedDisplay = document.getElementById('speedDisplay');
+  const resetBtn = document.getElementById('resetBtn');
+
+  function logUI(text) {
+    containerMsg.innerHTML = text;
+    console.log(text);
+  }
+
+  async function sendPointsToBackend(points) {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/points`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return await resp.json();
+    } catch (err) {
+      console.error('Ошибка отправки на backend:', err);
+      logUI('Ошибка запроса к backend — смотрите консоль');
+      return null;
+    }
+  }
+
+  function createPoint(type, lon, lat) { return { type, lon, lat }; }
+
+  const map = new mapgl.Map('container', {
+    center: [37.62, 55.75],
+    zoom: 13,
+    key: '285d3b2b-96ab-4fe5-a700-12ef370d7085',
+  });
+
+  let pointsArray = [];
+  let clickCount = 0;
+  let markerObjs = [];
+  let routePolylines = [];
+  let animMarker = null;
+  let animHandle = null;
+
+  function clearRoute() {
+    routePolylines.forEach(p => { try { p.destroy(); } catch(e){} });
+    routePolylines = [];
+    if (animMarker) { try { animMarker.destroy(); } catch(e){}; animMarker = null; }
+    if (animHandle) { cancelAnimationFrame(animHandle); animHandle = null; }
+    speedDisplay.innerText = 'Скорость: 0 км/ч';
+  }
+
+  function clearAll() {
+    markerObjs.forEach(m => { try { m.destroy(); } catch(e){} });
+    markerObjs = [];
+    pointsArray = [];
+    clickCount = 0;
+    clearRoute();
+    logUI('Кликните по карте: <b>1</b> — старт (A), <b>2</b> — финиш (B).');
+  }
+
+  resetBtn.addEventListener('click', clearAll);
+
+  function createHtmlMarker(coords, el) {
+    try { return new mapgl.HtmlMarker(map, { coordinates: coords, html: el }); }
+    catch(err1){ try { return new mapgl.HtmlMarker({ map: map, coordinates: coords, html: el }); }
+    catch(err2){ const m=new mapgl.Marker({map,coordinates:coords}); if(typeof m.setElement==='function') m.setElement(el); return m; } }
+  }
+
+  function makeDot(color,label) {
+    const d=document.createElement('div'); d.className='marker-dot';
+    d.style.background=color; d.style.width=d.style.height='22px';
+    d.style.lineHeight='22px'; d.style.border='2px solid white';
+    d.style.boxShadow='0 1px 3px rgba(0,0,0,0.4)'; d.style.fontSize='12px';
+    d.style.userSelect='none'; d.innerText=label||''; return d;
+  }
+
+  function getDistance([lon1,lat1],[lon2,lat2]){
+    const R=6371000, φ1=lat1*Math.PI/180, φ2=lat2*Math.PI/180;
+    const Δφ=(lat2-lat1)*Math.PI/180, Δλ=(lon2-lon1)*Math.PI/180;
+    const a=Math.sin(Δφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+    const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    return R*c;
+  }
+
+  map.on('load', () => logUI('Кликните по карте: <b>1</b> — старт (A), <b>2</b> — финиш (B).'));
+
+  map.on('click', async (e) => {
+    let [lng,lat] = Array.isArray(e.lngLat) ? e.lngLat : [e.lngLat.lng, e.lngLat.lat];
+    clickCount++;
+    const type = clickCount===1?'start':'stop', label=clickCount===1?'A':'B';
+    pointsArray.push(createPoint(type, lng, lat));
+    const dot = makeDot(type==='start'?'green':'red', label);
+    const m = createHtmlMarker([lng,lat], dot);
+    if(m) markerObjs.push(m);
+
+    if(clickCount===1) logUI('Выбрана точка START (A). Кликните второй раз — STOP (B).');
+    if(clickCount>=2){
+      logUI('Оба маркера установлены. Отправляю на backend...');
+      map.off('click');
+      const routeData = await sendPointsToBackend(pointsArray);
+      if(routeData){ logUI('Маршрут получен. Запускаю анимацию.'); buildRoute(routeData); }
+      else logUI('Не удалось получить маршрут. Нажмите "Сбросить точки".');
+    }
+  });
+
+  function buildRoute(routeData){
+    clearRoute();
+    const pathSegments=[];
+    routeData.segments.forEach(seg=>{
+      const segSpeed = seg.speed_mps && seg.speed_mps>0 ? seg.speed_mps : 0.1;
+      (seg.geometry_coords||[]).forEach((coord,i,arr)=>{
+        if(i<arr.length-1){
+          pathSegments.push({from:arr[i], to:arr[i+1], speedMps: segSpeed});
+        }
+      });
+    });
+
+    if(!pathSegments.length){
+      logUI('Путь пуст или слишком короткий — проверьте backend');
+      return;
+    }
+
+    const fullPath = pathSegments.map(s=>s.from).concat([pathSegments[pathSegments.length-1].to]);
+    routePolylines.push(new mapgl.Polyline(map,{coordinates:fullPath,color:'#ce3838',width:5}));
+
+    const cv=document.createElement('canvas'); cv.width=cv.height=80;
+    cv.style.position='absolute'; cv.style.transform='translate(-50%,-50%)';
+    const ctx=cv.getContext('2d');
+    function drawPulse(r){
+      ctx.clearRect(0,0,cv.width,cv.height);
+      ctx.beginPath(); ctx.arc(40,40,r,0,2*Math.PI); ctx.fillStyle='rgba(206,56,56,0.4)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(40,40,14,0,2*Math.PI); ctx.fillStyle='rgba(206,56,56,0.9)'; ctx.fill();
+    }
+
+    animMarker = createHtmlMarker(pathSegments[0].from, cv);
+
+    let idx = 0;
+    let lastTime = performance.now();
+    let lastPos = pathSegments[0].from;
+    let passed = [pathSegments[0].from];
+
+    function step(){
+      const now = performance.now();
+      const seg = pathSegments[idx];
+      const segDist = getDistance(seg.from, seg.to);
+      const segDuration = segDist / seg.speedMps * 1000; // мс
+
+      const t = Math.min((now - lastTime)/segDuration,1);
+      const nx = [ seg.from[0] + (seg.to[0]-seg.from[0])*t, seg.from[1] + (seg.to[1]-seg.from[1])*t ];
+      try{ animMarker.setCoordinates(nx); } catch(e){}
+
+      drawPulse(18 + 9*(0.5 + 0.5*Math.sin(Date.now()/250)));
+
+      // мгновенная скорость
+      const deltaDist = getDistance(lastPos,nx);
+      const deltaTime = (now - lastTime)/1000; // сек
+      const speedKmh = deltaTime>0 ? (deltaDist/deltaTime)*3.6 : 0;
+      speedDisplay.innerText = `Скорость: ${speedKmh.toFixed(1)} км/ч`;
+
+      const trailCoords = passed.concat([nx]);
+      routePolylines.forEach(p=>{ try{p.destroy(); } catch(e){} });
+      routePolylines.push(new mapgl.Polyline(map,{coordinates:trailCoords,color:'#ce3838',width:5}));
+
+      if(t<1){
+        requestAnimationFrame(step);
+      } else {
+        passed.push(seg.to);
+        lastPos = seg.to;
+        lastTime = performance.now();
+        idx++;
+        if(idx<pathSegments.length){
+          requestAnimationFrame(step);
+        } else {
+          speedDisplay.innerText = 'Скорость: 0 км/ч';
+          logUI('Анимация завершена. Нажмите "Сбросить точки".');
+        }
+      }
+    }
+
+    lastTime = performance.now();
+    animHandle = requestAnimationFrame(step);
+  }
+
+  clearAll();
+})();
+</script>
+</body>
+</html>

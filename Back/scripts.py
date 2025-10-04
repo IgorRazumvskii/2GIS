@@ -21,7 +21,8 @@ def get_routing_curl_style(api_key, app_id, points: List[Point]):
         "transport": "driving",
         "filters": [],
         "output": "detailed",
-        "locale": "ru"
+        "locale": "ru",
+        "traffic_mode": "jam",
     }
 
     try:
@@ -38,6 +39,23 @@ def get_routing_curl_style(api_key, app_id, points: List[Point]):
 
 
 def parse_route_data_from_json(data: dict):
+    """
+    Преобразует JSON с маршрутом от 2ГИС в удобный формат для визуализации:
+    - total_info: общая длительность и расстояние
+    - segments: список сегментов с геометрией, временем, расстоянием и скоростью
+    - pedestrian_paths: данные о пешеходных участках
+    """
+    def parse_linestring(selection: str):
+        """Парсинг строки LINESTRING в список [lon, lat]"""
+        selection = selection.replace("LINESTRING(", "").replace(")", "")
+        points = []
+        for pair in selection.split(","):
+            parts = pair.strip().split()
+            if len(parts) >= 2:
+                lon, lat = map(float, parts[:2])
+                points.append([lon, lat])
+        return points
+
     result_data = {
         "total_info": {},
         "segments": [],
@@ -47,16 +65,18 @@ def parse_route_data_from_json(data: dict):
     if "result" in data and isinstance(data["result"], list) and len(data["result"]) > 0:
         route = data["result"][0]
 
-        # Общая информация о маршруте
+        # --- Общая информация ---
         if "total_duration" in route:
-            result_data["total_info"]["total_duration_seconds"] = route["total_duration"]
-            result_data["total_info"]["total_duration_minutes"] = route["total_duration"] / 60
+            total_sec = route["total_duration"]
+            result_data["total_info"]["total_duration_seconds"] = total_sec
+            result_data["total_info"]["total_duration_minutes"] = total_sec / 60
 
         if "total_distance" in route:
-            result_data["total_info"]["total_distance_meters"] = route["total_distance"]
-            result_data["total_info"]["total_distance_km"] = route["total_distance"] / 1000
+            total_m = route["total_distance"]
+            result_data["total_info"]["total_distance_meters"] = total_m
+            result_data["total_info"]["total_distance_km"] = total_m / 1000
 
-        # Сегменты маршрута
+        # --- Сегменты маршрута ---
         if "maneuvers" in route:
             for i, maneuver in enumerate(route["maneuvers"]):
                 if "outcoming_path" in maneuver:
@@ -68,26 +88,36 @@ def parse_route_data_from_json(data: dict):
                             "comment": maneuver.get("comment", ""),
                             "distance_meters": path["distance"],
                             "duration_seconds": path["duration"],
-                            "geometry": path.get("geometry", [])
+                            "speed_mps": path["distance"] / path["duration"] if path["duration"] > 0 else 0,
+                            "geometry": path.get("geometry", []),
+                            "geometry_coords": []
                         }
+                        # Разбираем геометрию для анимации
+                        for g in path.get("geometry", []):
+                            if "selection" in g:
+                                segment["geometry_coords"].extend(parse_linestring(g["selection"]))
+                        # Опционально: угол и направление поворота
+                        segment["turn_angle"] = maneuver.get("turn_angle")
+                        segment["turn_direction"] = maneuver.get("turn_direction")
                         result_data["segments"].append(segment)
 
-        # Пешеходные пути
-        if "begin_pedestrian_path" in route:
-            begin_path = route["begin_pedestrian_path"]
-            if "duration" in begin_path and "distance" in begin_path:
-                result_data["pedestrian_paths"].append({
-                    "type": "start",
-                    "distance_meters": begin_path["distance"],
-                    "duration_seconds": begin_path["duration"]
-                })
+        # --- Пешеходные пути ---
+        for key, path_key in [("begin_pedestrian_path", "start"), ("end_pedestrian_path", "end")]:
+            if key in route:
+                ppath = route[key]
+                if "distance" in ppath and "duration" in ppath:
+                    path_dict = {
+                        "type": path_key,
+                        "distance_meters": ppath["distance"],
+                        "duration_seconds": ppath["duration"],
+                        "speed_mps": ppath["distance"] / ppath["duration"] if ppath["duration"] > 0 else 0,
+                        "geometry_coords": []
+                    }
+                    # Геометрия пешеходного пути
+                    geometry = ppath.get("geometry", {})
+                    if "selection" in geometry:
+                        path_dict["geometry_coords"] = parse_linestring(geometry["selection"])
+                    result_data["pedestrian_paths"].append(path_dict)
 
-        if "end_pedestrian_path" in route:
-            end_path = route["end_pedestrian_path"]
-            if "duration" in end_path and "distance" in end_path:
-                result_data["pedestrian_paths"].append({
-                    "type": "end",
-                    "distance_meters": end_path["distance"],
-                    "duration_seconds": end_path["duration"]
-                })
     return result_data
+
