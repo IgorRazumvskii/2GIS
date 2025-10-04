@@ -45,3 +45,9 @@ Thumbs.db
 
 # Дополнительно
 *.bak
+
+# MacOS
+.DS_Store
+
+# IDE
+.idea/
