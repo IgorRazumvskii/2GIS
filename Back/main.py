@@ -11,6 +11,7 @@ from scripts import get_routing_curl_style, parse_route_data_from_json
 from models import *
 
 app = FastAPI()
+load_dotenv()
 API_KEY = os.getenv("API_KEY")
 APP_ID = os.getenv("APP_ID")
 
