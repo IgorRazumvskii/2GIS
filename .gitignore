@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Виртуальное окружение
+Back/venv/
+env/
+.venv/
+.env/
+Back/.env
+Back/.env/
+
+# Pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Установленные пакеты
+*.egg-info/
+dist/
+build/
+
+# Pytest
+.pytest_cache/
+.cache/
+
+# IDE / редакторы
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Логи
+*.log
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# FastAPI / Uvicorn
+*.db
+*.sqlite3
+
+# Дополнительно
+*.bak

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>2GIS Map API - Pulsating circle along the route with a path line</title>
+    <style>
+    html, body, #container {
+        margin: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+    }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <script src="https://mapgl.2gis.com/api/js/v1"></script>
+    <script>
+        const map = new mapgl.Map('container', {
+            center: [37.620, 55.750],
+            zoom: 14,
+            key: '285d3b2b-96ab-4fe5-a700-12ef370d7085',
+        });
+
+        const path = [
+            [37.62372, 55.74965],
+            [37.61306, 55.74789],
+            [37.61189, 55.74826],
+            [37.61097, 55.74889],
+            [37.60950, 55.74937],
+            [37.60972, 55.75055],
+            [37.61114, 55.75259],
+            [37.61448, 55.75655],
+            [37.61780, 55.75844],
+            [37.62453, 55.75953],
+            [37.62576, 55.75950],
+            [37.62696, 55.75872],
+            [37.63023, 55.75660],
+            [37.63334, 55.75432],
+            [37.63228, 55.74980],
+            [37.62812, 55.74995],
+            [37.62372, 55.74965],
+        ];
+
+        const segmentSpeedsMps = [
+            45,
+            25,
+            15,
+            15,
+            30,
+            30,
+            30,
+            20,
+            30,
+            30,
+            20,
+            30,
+            15,
+            20,
+            23,
+            45,
+        ];
+
+        function getDistance([lon1, lat1], [lon2, lat2]) {
+            const R = 6371000; // Радиус земли, м
+            const φ1 = lat1 * Math.PI/180;
+            const φ2 = lat2 * Math.PI/180;
+            const Δφ = (lat2 - lat1) * Math.PI/180;
+            const Δλ = (lon2 - lon1) * Math.PI/180;
+            const a = Math.sin(Δφ/2)*Math.sin(Δφ/2) +
+                Math.cos(φ1)*Math.cos(φ2) *
+                Math.sin(Δλ/2)*Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        const segmentDurationsMs = path.slice(0, -1).map((_, i) => {
+            const dist = getDistance(path[i], path[i + 1]);
+            const speed = segmentSpeedsMps[i]; // м/с
+            return (dist / speed) * 1000; // мс
+        });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 80;
+        canvas.height = 80;
+        canvas.style.position = 'absolute';
+        canvas.style.transform = 'translate(-50%, -50%)';
+
+        const ctx = canvas.getContext('2d');
+
+        function drawPulse(radius) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.arc(40, 40, radius, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(206,56,56,0.4)';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(40, 40, 14, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(206,56,56,0.8)';
+            ctx.fill();
+        }
+
+        const htmlMarker = new mapgl.HtmlMarker(map, {
+            coordinates: path[0],
+            html: canvas,
+            zIndex: 100,
+        });
+
+        function interpolateCoords(a, b, t) {
+            return [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+            ];
+        }
+
+        let index = 0;
+        let passedCoords = [path[0]];
+        let polylines = [];
+        let startTime = performance.now();
+
+        function destroyPolylines() {
+            polylines.forEach(p => p.destroy());
+            polylines = [];
+        }
+
+        function animate() {
+            const animRadius = 18 + 9 * (0.5 + 0.5 * Math.sin(Date.now() / 250));
+            drawPulse(animRadius);
+
+            const now = performance.now();
+            const duration = segmentDurationsMs[index];
+            const t = Math.min((now - startTime) / duration, 1);
+
+            const newCoord = interpolateCoords(path[index], path[index + 1], t);
+            htmlMarker.setCoordinates(newCoord);
+
+            const updatedPassed = passedCoords.slice();
+            updatedPassed.push(newCoord);
+            destroyPolylines();
+            polylines.push(
+                new mapgl.Polyline(map, {
+                    coordinates: updatedPassed,
+                    color: '#ce3838',
+                    width: 5,
+                })
+            );
+
+            if (t < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                index++;
+                if (index >= path.length - 1) {
+                    index = 0;
+                    passedCoords = [path[0]];
+                    destroyPolylines();
+                } else {
+                    passedCoords.push(path[index]);
+                }
+                startTime = performance.now();
+                requestAnimationFrame(animate);
+            }
+        }
+
+        animate();
+    </script>
+</body>
+</html>
+
